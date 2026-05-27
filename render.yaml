@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: love-passbook
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: FEISHU_APP_ID
+        value: cli_aa9c0fff49f99cd2
+      - key: FEISHU_APP_SECRET
+        sync: false
+      - key: BITABLE_APP_TOKEN
+        value: E17lbWDcuazeiksQSDycnZwnbe
+      - key: TABLE_VOLUNTEERS
+        value: tblprz63ICbhW9fH
+      - key: TABLE_ACTIVITIES
+        value: tbl49V0PsmVk6jZl
+      - key: TABLE_STAMP_RECORDS
+        value: tblEdAEZxywzcVFD
