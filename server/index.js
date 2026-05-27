@@ -28,7 +28,14 @@ app.get('/api/health', (req, res) => { res.json({ status: 'ok', time: new Date()
 // 托管前端
 const publicPath = path.join(__dirname, '..', 'public');
 app.use(express.static(publicPath));
-app.get('*', (req, res) => { if (!req.path.startsWith('/api')) res.sendFile(path.join(publicPath, 'index.html')); });
+// SPA fallback: 所有非API路由返回index.html
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api')) {
+    res.status(404).json({ error: 'Not found' });
+  } else {
+    res.sendFile(path.join(publicPath, 'index.html'));
+  }
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`📖 爱心存折(飞书版) 已启动 | 端口: ${PORT}`);
