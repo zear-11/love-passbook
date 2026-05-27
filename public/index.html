@@ -353,8 +353,8 @@
       <input class="form-input" id="inputName" placeholder="请输入你的姓名" maxlength="20">
     </div>
     <div class="form-group">
-      <label class="form-label">工号</label>
-      <input class="form-input" id="inputId" placeholder="请输入你的工号" maxlength="20">
+      <label class="form-label">手机号</label>
+      <input class="form-input" id="inputPhone" placeholder="请输入你的手机号" maxlength="20" type="tel">
     </div>
     <button class="btn btn-primary" onclick="lookupPassbook()">查看我的存折</button>
   </div>
@@ -417,12 +417,8 @@
       <input class="form-input" id="entryName" placeholder="你的姓名" maxlength="20">
     </div>
     <div class="form-group">
-      <label class="form-label">工号</label>
-      <input class="form-input" id="entryId" placeholder="你的工号" maxlength="20">
-    </div>
-    <div class="form-group">
-      <label class="form-label">手机号（用于验证身份）</label>
-      <input class="form-input" id="entryPhone" placeholder="你的手机号" maxlength="20">
+      <label class="form-label">手机号</label>
+      <input class="form-input" id="entryPhone" placeholder="你的手机号" maxlength="20" type="tel">
     </div>
     <div class="form-group">
       <label class="form-label">部门</label>
@@ -503,7 +499,7 @@
         </div>
         <div class="batch-area">
           <label class="form-label">参与人员名单</label>
-          <textarea id="batchNames" placeholder="每行一人，格式：姓名,工号,部门,手机号&#10;例如：&#10;张三,A001,技术部,13800001111&#10;李四,A002,市场部,13800002222"></textarea>
+          <textarea id="batchNames" placeholder="每行一人，格式：姓名,手机号,部门&#10;例如：&#10;张三,13800001111,技术部&#10;李四,13800002222,市场部"></textarea>
           <div class="help-text">💡 支持从Excel直接粘贴，或逐行输入</div>
         </div>
         <button class="btn btn-primary" onclick="batchEntry()" style="margin-top:12px;">批量录入</button>
@@ -536,7 +532,7 @@
       </div>
       <div class="card">
         <div class="card-title"><span class="icon">👥</span> 志愿者列表</div>
-        <input class="form-input" id="searchVolunteer" placeholder="搜索姓名/工号/手机号" style="margin-bottom:12px;" oninput="renderVolunteerList()">
+        <input class="form-input" id="searchVolunteer" placeholder="搜索姓名/手机号/部门" style="margin-bottom:12px;" oninput="renderVolunteerList()">
         <div id="volunteerList"></div>
       </div>
       <div class="card">
@@ -653,16 +649,16 @@ async function refreshActivitySelects() {
 // ==================== 查询存折 ====================
 async function lookupPassbook() {
   const name = document.getElementById('inputName').value.trim();
-  const empId = document.getElementById('inputId').value.trim();
-  if (!name || !empId) { showToast('请填写姓名和工号', 'error'); return; }
+  const phone = document.getElementById('inputPhone').value.trim();
+  if (!name || !phone) { showToast('请填写姓名和手机号', 'error'); return; }
 
   try {
-    const result = await api(`/api/volunteers?name=${encodeURIComponent(name)}&employee_id=${encodeURIComponent(empId)}`);
+    const result = await api(`/api/volunteers?name=${encodeURIComponent(name)}&phone=${encodeURIComponent(phone)}`);
     let volunteer = result.volunteers?.[0];
     if (!volunteer) {
       const createResult = await api('/api/volunteers', {
         method: 'POST',
-        body: JSON.stringify({ name, employee_id: empId }),
+        body: JSON.stringify({ name, phone }),
       });
       volunteer = createResult.volunteer;
       if (!createResult.existed) showToast(`欢迎 ${name}！已为你创建专属存折 🎉`);
@@ -842,14 +838,13 @@ function goSelfEntry() {
 
 async function submitSelfEntry() {
   const name = document.getElementById('entryName').value.trim();
-  const empId = document.getElementById('entryId').value.trim();
   const phone = document.getElementById('entryPhone').value.trim();
   const dept = document.getElementById('entryDept').value.trim();
   const activityId = document.getElementById('entryActivity').value;
   const hours = parseFloat(document.getElementById('entryHours').value);
   const note = document.getElementById('entryNote').value.trim();
 
-  if (!name || !empId) { showToast('请填写姓名和工号', 'error'); return; }
+  if (!name || !phone) { showToast('请填写姓名和手机号', 'error'); return; }
   if (!activityId) { showToast('请选择活动', 'error'); return; }
   if (!hours || hours <= 0) { showToast('请填写有效时长', 'error'); return; }
 
@@ -857,11 +852,11 @@ async function submitSelfEntry() {
     // 确保志愿者存在
     let volId = currentVolunteer?.id;
     if (!volId) {
-      const vResult = await api(`/api/volunteers?name=${encodeURIComponent(name)}&employee_id=${encodeURIComponent(empId)}`);
+      const vResult = await api(`/api/volunteers?name=${encodeURIComponent(name)}&phone=${encodeURIComponent(phone)}`);
       const vol = vResult.volunteers?.[0];
       if (vol) { volId = vol.id; currentVolunteer = vol; }
       else {
-        const cResult = await api('/api/volunteers', { method: 'POST', body: JSON.stringify({ name, employee_id: empId, department: dept, phone }) });
+        const cResult = await api('/api/volunteers', { method: 'POST', body: JSON.stringify({ name, phone, department: dept }) });
         volId = cResult.volunteer.id; currentVolunteer = cResult.volunteer;
       }
     }
@@ -941,7 +936,7 @@ async function refreshReviewList() {
           <span class="badge badge-pending">⏳ 待审核</span>
         </div>
         <div style="font-size:13px;color:var(--text-light);line-height:1.8;">
-          🏢 工号：${r.volunteer_employee_id || ''}<br>
+          📱 手机：${r.volunteer_phone || ''}<br>
           🎯 活动：${r.activity_name || '未知活动'}<br>
           ⏱ 时长：${r.hours}h · 📅 ${r.date || ''}<br>
           ${r.note ? '💬 备注：' + r.note : ''}
@@ -985,7 +980,7 @@ async function renderVolunteerList() {
     listDiv.innerHTML = vols.map(v => `
       <div class="list-item">
         <div class="list-item-info">
-          <div class="list-item-title">${v.name} <span style="font-size:12px;color:var(--text-light);font-weight:400;">${v.employee_id}</span></div>
+          <div class="list-item-title">${v.name} <span style="font-size:12px;color:var(--text-light);font-weight:400;">${v.phone}</span></div>
           <div class="list-item-sub">${v.department || ''} · ${v.total_stamps}章 · ${v.total_hours}h${v.redeem_status === 'redeemed' ? ' · 🎁已兑换' : ''}</div>
         </div>
         <button class="btn btn-sm btn-outline" onclick="deleteVol(${v.id})" style="padding:6px 12px;font-size:12px;">删除</button>
@@ -1009,7 +1004,7 @@ async function renderRedemptions() {
     div.innerHTML = list.map(r => `
       <div class="list-item">
         <div class="list-item-info">
-          <div class="list-item-title">${r.volunteer_name} <span style="font-size:12px;color:var(--text-light);">${r.employee_id}</span></div>
+          <div class="list-item-title">${r.volunteer_name} <span style="font-size:12px;color:var(--text-light);">${r.phone || ''}</span></div>
           <div class="list-item-sub">${r.stamps_count}枚章 · ${r.redeemed_at}</div>
         </div>
         <span class="badge badge-redeem">🎁 已兑换</span>
@@ -1034,16 +1029,16 @@ async function batchEntry() {
     const records = [];
     for (const line of lines) {
       const parts = line.split(/[,，\t]/).map(s => s.trim());
-      const name = parts[0], empId = parts[1] || '', dept = parts[2] || '', phone = parts[3] || '';
+      const name = parts[0], phone = parts[1] || '', dept = parts[2] || '';
       if (!name) continue;
       // 查找或创建志愿者
       let volId;
-      if (empId) {
-        const vResult = await api(`/api/volunteers?name=${encodeURIComponent(name)}&employee_id=${encodeURIComponent(empId)}`);
+      if (phone) {
+        const vResult = await api(`/api/volunteers?name=${encodeURIComponent(name)}&phone=${encodeURIComponent(phone)}`);
         const vol = vResult.volunteers?.[0];
         if (vol) { volId = vol.id; }
         else {
-          const cResult = await api('/api/volunteers', { method: 'POST', body: JSON.stringify({ name, employee_id: empId, department: dept, phone }) });
+          const cResult = await api('/api/volunteers', { method: 'POST', body: JSON.stringify({ name, phone, department: dept }) });
           volId = cResult.volunteer.id;
         }
       } else {
@@ -1051,7 +1046,7 @@ async function batchEntry() {
         const vol = vResult.volunteers?.[0];
         if (vol) { volId = vol.id; }
         else {
-          const cResult = await api('/api/volunteers', { method: 'POST', body: JSON.stringify({ name, employee_id: 'AUTO_' + Date.now(), department: dept, phone }) });
+          const cResult = await api('/api/volunteers', { method: 'POST', body: JSON.stringify({ name, phone: 'NOPHONE_' + Date.now() }) });
           volId = cResult.volunteer.id;
         }
       }

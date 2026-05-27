@@ -30,9 +30,8 @@ function initTables() {
     CREATE TABLE IF NOT EXISTS volunteers (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       name          TEXT    NOT NULL,
-      employee_id   TEXT    NOT NULL,
+      phone         TEXT    NOT NULL,
       department    TEXT    DEFAULT '',
-      phone         TEXT    DEFAULT '',
       total_stamps  INTEGER DEFAULT 0,
       total_hours   REAL    DEFAULT 0,
       redeem_status TEXT    DEFAULT 'none',   -- none / available / redeemed
@@ -87,8 +86,8 @@ function initTables() {
     );
 
     -- 索引
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_volunteer_name_emp
-      ON volunteers(name, employee_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_volunteer_name_phone
+      ON volunteers(name, phone);
 
     CREATE INDEX IF NOT EXISTS idx_records_volunteer
       ON stamp_records(volunteer_id);

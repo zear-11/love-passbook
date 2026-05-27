@@ -7,27 +7,27 @@ const router = express.Router();
 // ==================== 志愿者 ====================
 
 /**
- * GET /api/volunteers?name=&employee_id=&phone=&keyword=
+ * GET /api/volunteers?name=&phone=&keyword=
  */
 router.get('/', (req, res) => {
   try {
     const db = getDb();
-    const { name, employee_id, phone, keyword } = req.query;
+    const { name, phone, keyword } = req.query;
 
     let sql = 'SELECT * FROM volunteers WHERE 1=1';
     const params = [];
 
-    if (name && employee_id) {
-      sql += ' AND name = ? AND employee_id = ?';
-      params.push(name, employee_id);
-    } else if (name) {
-      sql += ' AND name = ?';
-      params.push(name);
+    if (name && phone) {
+      sql += ' AND name = ? AND phone = ?';
+      params.push(name, phone);
     } else if (phone) {
       sql += ' AND phone = ?';
       params.push(phone);
+    } else if (name) {
+      sql += ' AND name = ?';
+      params.push(name);
     } else if (keyword) {
-      sql += ' AND (name LIKE ? OR employee_id LIKE ? OR phone LIKE ?)';
+      sql += ' AND (name LIKE ? OR phone LIKE ? OR department LIKE ?)';
       params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
     }
 
@@ -46,30 +46,28 @@ router.get('/', (req, res) => {
  */
 router.post('/', (req, res) => {
   try {
-    const { name, employee_id, department, phone } = req.body;
+    const { name, phone, department } = req.body;
 
-    if (!name || !employee_id) {
-      return res.status(400).json({ error: '姓名和工号不能为空' });
+    if (!name || !phone) {
+      return res.status(400).json({ error: '姓名和手机号不能为空' });
     }
 
     const db = getDb();
 
     // 查找已有
-    const existing = db.prepare('SELECT * FROM volunteers WHERE name = ? AND employee_id = ?').get(name, employee_id);
+    const existing = db.prepare('SELECT * FROM volunteers WHERE name = ? AND phone = ?').get(name, phone);
     if (existing) {
-      // 更新手机号（如果提供了新的）
-      if (phone && !existing.phone) {
-        db.prepare('UPDATE volunteers SET phone = ?, department = COALESCE(NULLIF(department,\'\'),?) WHERE id = ?')
-          .run(phone, department || '', existing.id);
-        existing.phone = phone;
-        existing.department = existing.department || department || '';
+      // 更新部门（如果提供了新的）
+      if (department && !existing.department) {
+        db.prepare('UPDATE volunteers SET department = ? WHERE id = ?').run(department, existing.id);
+        existing.department = department;
       }
       return res.json({ volunteer: existing, existed: true });
     }
 
     const result = db.prepare(
-      'INSERT INTO volunteers (name, employee_id, department, phone) VALUES (?, ?, ?, ?)'
-    ).run(name, employee_id, department || '', phone || '');
+      'INSERT INTO volunteers (name, phone, department) VALUES (?, ?, ?)'
+    ).run(name, phone, department || '');
 
     const volunteer = db.prepare('SELECT * FROM volunteers WHERE id = ?').get(result.lastInsertRowid);
     res.json({ volunteer, existed: false });
@@ -143,7 +141,7 @@ router.get('/stamp-records', (req, res) => {
     const { volunteer_id, status } = req.query;
 
     let sql = `SELECT sr.*, a.name as activity_name, a.date as activity_date, a.location as activity_location,
-               v.name as volunteer_name, v.employee_id as volunteer_employee_id
+               v.name as volunteer_name, v.phone as volunteer_phone, v.department as volunteer_department
                FROM stamp_records sr
                LEFT JOIN activities a ON sr.activity_id = a.id
                LEFT JOIN volunteers v ON sr.volunteer_id = v.id
@@ -170,7 +168,6 @@ router.get('/stamp-records', (req, res) => {
 
 /**
  * POST /api/volunteers/stamp-records
- * 创建印章记录
  */
 router.post('/stamp-records', (req, res) => {
   try {
@@ -182,7 +179,6 @@ router.post('/stamp-records', (req, res) => {
 
     const db = getDb();
 
-    // 检查重复（排除rejected的）
     const dup = db.prepare(
       'SELECT id FROM stamp_records WHERE volunteer_id = ? AND activity_id = ? AND status != ?'
     ).get(volunteer_id, activity_id, 'rejected');
@@ -196,7 +192,6 @@ router.post('/stamp-records', (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(volunteer_id, activity_id, hours || 2, date || '', source || 'self', status || 'pending', note || '');
 
-    // 如果直接approved，更新志愿者统计
     if (status === 'approved') {
       updateVolunteerStats(volunteer_id);
     }
@@ -243,11 +238,10 @@ router.put('/stamp-records/:id/review', requireAdmin, (req, res) => {
 
 /**
  * POST /api/volunteers/stamp-records/batch
- * 批量录入
  */
 router.post('/stamp-records/batch', requireAdmin, (req, res) => {
   try {
-    const { records } = req.body; // [{ volunteer_id, activity_id, hours, date }]
+    const { records } = req.body;
     if (!Array.isArray(records) || records.length === 0) {
       return res.status(400).json({ error: 'records不能为空' });
     }
@@ -277,7 +271,6 @@ router.post('/stamp-records/batch', requireAdmin, (req, res) => {
 
     transaction();
 
-    // 更新统计
     for (const vid of updatedVolunteerIds) {
       updateVolunteerStats(vid);
     }
@@ -292,7 +285,6 @@ router.post('/stamp-records/batch', requireAdmin, (req, res) => {
 
 /**
  * POST /api/volunteers/redeem
- * 志愿者申请兑换礼品（满6章）
  */
 router.post('/redeem', (req, res) => {
   try {
@@ -311,12 +303,10 @@ router.post('/redeem', (req, res) => {
       return res.status(400).json({ error: '已兑换过礼品' });
     }
 
-    // 创建兑换记录
     db.prepare(
       'INSERT INTO redemptions (volunteer_id, stamps_count, status) VALUES (?, ?, ?)'
     ).run(volunteer_id, volunteer.total_stamps, 'pending');
 
-    // 更新志愿者状态
     db.prepare('UPDATE volunteers SET redeem_status = ?, redeem_at = datetime(\'now\',\'localtime\') WHERE id = ?')
       .run('redeemed', volunteer_id);
 
@@ -329,13 +319,12 @@ router.post('/redeem', (req, res) => {
 
 /**
  * GET /api/volunteers/redemptions
- * 获取兑换记录列表（管理员）
  */
 router.get('/redemptions', requireAdmin, (req, res) => {
   try {
     const db = getDb();
     const redemptions = db.prepare(
-      `SELECT r.*, v.name as volunteer_name, v.employee_id, v.department, v.phone
+      `SELECT r.*, v.name as volunteer_name, v.phone, v.department
        FROM redemptions r
        LEFT JOIN volunteers v ON r.volunteer_id = v.id
        ORDER BY r.redeemed_at DESC`
@@ -348,7 +337,6 @@ router.get('/redemptions', requireAdmin, (req, res) => {
 
 /**
  * GET /api/volunteers/stats
- * 数据总览
  */
 router.get('/stats', (req, res) => {
   try {

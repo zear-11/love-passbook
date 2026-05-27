@@ -23,23 +23,19 @@ if (count.c === 0) {
 
   // 活动
   const insertAct = db.prepare('INSERT INTO activities (name, date, location, default_hours) VALUES (?, ?, ?, ?)');
-  const acts = [
-    insertAct.run('植树节志愿活动', '2024-03-12', '城市公园', 3),
-    insertAct.run('敬老院慰问', '2024-05-18', '阳光敬老院', 2),
-    insertAct.run('儿童图书馆捐赠', '2024-06-01', '市图书馆', 2),
-    insertAct.run('海滩清洁行动', '2024-08-15', '金沙湾海滩', 4),
-    insertAct.run('暖冬衣物募集', '2024-11-20', '公司大厅', 2),
-    insertAct.run('春运志愿服务', '2025-01-18', '火车站', 5),
-  ];
+  insertAct.run('植树节志愿活动', '2024-03-12', '城市公园', 3);
+  insertAct.run('敬老院慰问', '2024-05-18', '阳光敬老院', 2);
+  insertAct.run('儿童图书馆捐赠', '2024-06-01', '市图书馆', 2);
+  insertAct.run('海滩清洁行动', '2024-08-15', '金沙湾海滩', 4);
+  insertAct.run('暖冬衣物募集', '2024-11-20', '公司大厅', 2);
+  insertAct.run('春运志愿服务', '2025-01-18', '火车站', 5);
 
-  // 志愿者
-  const insertVol = db.prepare('INSERT INTO volunteers (name, employee_id, department, phone, total_stamps, total_hours) VALUES (?, ?, ?, ?, ?, ?)');
-  const vols = [
-    insertVol.run('张三', 'A001', '技术部', '13800001111', 5, 13),
-    insertVol.run('李四', 'A002', '市场部', '13800002222', 3, 10),
-    insertVol.run('王五', 'A003', '财务部', '13800003333', 1, 2),
-    insertVol.run('赵六', 'A004', '人力部', '13800004444', 2, 7),
-  ];
+  // 志愿者（姓名+手机号）
+  const insertVol = db.prepare('INSERT INTO volunteers (name, phone, department, total_stamps, total_hours) VALUES (?, ?, ?, ?, ?)');
+  insertVol.run('张三', '13800001111', '技术部', 5, 13);
+  insertVol.run('李四', '13800002222', '市场部', 3, 10);
+  insertVol.run('王五', '13800003333', '财务部', 1, 2);
+  insertVol.run('赵六', '13800004444', '人力部', 2, 7);
 
   // 印章记录
   const insertRec = db.prepare('INSERT INTO stamp_records (volunteer_id, activity_id, hours, date, source, status, note) VALUES (?, ?, ?, ?, ?, ?, ?)');
