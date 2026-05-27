@@ -1,364 +1,223 @@
 const express = require('express');
-const { getDb } = require('../db/schema');
-const { updateVolunteerStats } = require('../services/volunteer');
+const { TABLE_VOLUNTEERS, TABLE_ACTIVITIES, TABLE_STAMP_RECORDS,
+        listAllRecords, createRecord, batchCreateRecords, updateRecord, deleteRecord } = require('../feishu');
 
 const router = express.Router();
 
-// ==================== 志愿者 ====================
-
-/**
- * GET /api/volunteers?name=&phone=&keyword=
- */
-router.get('/', (req, res) => {
-  try {
-    const db = getDb();
-    const { name, phone, keyword } = req.query;
-
-    let sql = 'SELECT * FROM volunteers WHERE 1=1';
-    const params = [];
-
-    if (name && phone) {
-      sql += ' AND name = ? AND phone = ?';
-      params.push(name, phone);
-    } else if (phone) {
-      sql += ' AND phone = ?';
-      params.push(phone);
-    } else if (name) {
-      sql += ' AND name = ?';
-      params.push(name);
-    } else if (keyword) {
-      sql += ' AND (name LIKE ? OR phone LIKE ? OR department LIKE ?)';
-      params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
-    }
-
-    sql += ' ORDER BY id DESC';
-
-    const volunteers = db.prepare(sql).all(...params);
-    res.json({ volunteers });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// 所有路由需登录
+router.use((req, res, next) => {
+  if (!req.session.user && !req.session.admin) return res.status(401).json({ error: '未登录' });
+  next();
 });
 
-/**
- * POST /api/volunteers
- * 创建志愿者（如不存在则创建）
- */
-router.post('/', (req, res) => {
+function requireAdmin(req, res, next) {
+  if (!req.session.admin) return res.status(403).json({ error: '需要管理员权限' });
+  next();
+}
+
+// ===== 志愿者 =====
+
+// GET /api/feishu/volunteers?name=&phone=&keyword=
+router.get('/volunteers', async (req, res) => {
+  try {
+    const { name, phone, keyword } = req.query;
+    const conditions = [];
+    if (name && phone) { conditions.push(`CurrentValue.[姓名]="${name}"`); conditions.push(`CurrentValue.[手机号]="${phone}"`); }
+    else if (phone) { conditions.push(`CurrentValue.[手机号]="${phone}"`); }
+    else if (name) { conditions.push(`CurrentValue.[姓名]="${name}"`); }
+    else if (keyword) { conditions.push(`OR(CurrentValue.[姓名].Contains("${keyword}"),CurrentValue.[手机号].Contains("${keyword}"))`); }
+    const filter = conditions.length > 0 ? (conditions.length === 1 ? conditions[0] : `AND(${conditions.join(',')})`) : undefined;
+    const items = await listAllRecords(TABLE_VOLUNTEERS, filter ? { filter } : {});
+    const volunteers = items.map(i => ({ recordId: i.record_id, name: i.fields['姓名'] || '', phone: i.fields['手机号'] || '', department: i.fields['部门'] || '', totalStamps: i.fields['志愿章数'] || 0, totalHours: i.fields['志愿时长'] || 0, redeemStatus: i.fields['兑换状态'] || '未兑换' }));
+    res.json({ volunteers });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/feishu/volunteers
+router.post('/volunteers', async (req, res) => {
   try {
     const { name, phone, department } = req.body;
-
-    if (!name || !phone) {
-      return res.status(400).json({ error: '姓名和手机号不能为空' });
+    if (!name || !phone) return res.status(400).json({ error: '姓名和手机号不能为空' });
+    // 检查是否已存在
+    const existing = await listAllRecords(TABLE_VOLUNTEERS, { filter: `AND(CurrentValue.[姓名]="${name}",CurrentValue.[手机号]="${phone}")` });
+    if (existing.length > 0) {
+      const i = existing[0];
+      return res.json({ volunteer: { recordId: i.record_id, name: i.fields['姓名'], phone: i.fields['手机号'], department: i.fields['部门'] || '', totalStamps: i.fields['志愿章数'] || 0, totalHours: i.fields['志愿时长'] || 0, redeemStatus: i.fields['兑换状态'] || '未兑换' }, existed: true });
     }
-
-    const db = getDb();
-
-    // 查找已有
-    const existing = db.prepare('SELECT * FROM volunteers WHERE name = ? AND phone = ?').get(name, phone);
-    if (existing) {
-      // 更新部门（如果提供了新的）
-      if (department && !existing.department) {
-        db.prepare('UPDATE volunteers SET department = ? WHERE id = ?').run(department, existing.id);
-        existing.department = department;
-      }
-      return res.json({ volunteer: existing, existed: true });
-    }
-
-    const result = db.prepare(
-      'INSERT INTO volunteers (name, phone, department) VALUES (?, ?, ?)'
-    ).run(name, phone, department || '');
-
-    const volunteer = db.prepare('SELECT * FROM volunteers WHERE id = ?').get(result.lastInsertRowid);
-    res.json({ volunteer, existed: false });
-  } catch (err) {
-    if (err.message.includes('UNIQUE constraint')) {
-      return res.status(400).json({ error: '该志愿者已存在' });
-    }
-    res.status(500).json({ error: err.message });
-  }
+    const record = await createRecord(TABLE_VOLUNTEERS, { '姓名': name, '手机号': phone, '部门': department || '', '志愿章数': 0, '志愿时长': 0, '兑换状态': '未兑换' });
+    res.json({ volunteer: { recordId: record.record_id, name, phone, department: department || '', totalStamps: 0, totalHours: 0, redeemStatus: '未兑换' }, existed: false });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/**
- * DELETE /api/volunteers/:id
- */
-router.delete('/:id', requireAdmin, (req, res) => {
+// DELETE /api/feishu/volunteers/:recordId
+router.delete('/volunteers/:recordId', requireAdmin, async (req, res) => {
   try {
-    const db = getDb();
-    const { id } = req.params;
-    db.prepare('DELETE FROM stamp_records WHERE volunteer_id = ?').run(id);
-    db.prepare('DELETE FROM redemptions WHERE volunteer_id = ?').run(id);
-    db.prepare('DELETE FROM volunteers WHERE id = ?').run(id);
+    const { recordId } = req.params;
+    // 删除该志愿者的所有印章记录
+    const records = await listAllRecords(TABLE_STAMP_RECORDS, { filter: `CurrentValue.[志愿者ID]="${recordId}"` });
+    for (const r of records) { await deleteRecord(TABLE_STAMP_RECORDS, r.record_id); }
+    await deleteRecord(TABLE_VOLUNTEERS, recordId);
     res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ==================== 活动 ====================
+// ===== 活动 =====
 
-/**
- * GET /api/activities
- */
-router.get('/activities', (req, res) => {
+router.get('/activities', async (req, res) => {
   try {
-    const db = getDb();
-    const activities = db.prepare('SELECT * FROM activities ORDER BY date DESC').all();
+    const items = await listAllRecords(TABLE_ACTIVITIES);
+    const activities = items.map(i => ({ recordId: i.record_id, name: i.fields['活动名称'] || '', date: i.fields['活动日期'] || '', location: i.fields['活动地点'] || '', defaultHours: i.fields['默认时长'] || 2 }));
     res.json({ activities });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/**
- * POST /api/volunteers/activities
- */
-router.post('/activities', requireAdmin, (req, res) => {
+router.post('/activities', requireAdmin, async (req, res) => {
   try {
-    const { name, date, location, default_hours } = req.body;
+    const { name, date, location, defaultHours } = req.body;
     if (!name) return res.status(400).json({ error: '活动名称不能为空' });
-
-    const db = getDb();
-    const result = db.prepare(
-      'INSERT INTO activities (name, date, location, default_hours) VALUES (?, ?, ?, ?)'
-    ).run(name, date || '', location || '', default_hours || 2);
-
-    const activity = db.prepare('SELECT * FROM activities WHERE id = ?').get(result.lastInsertRowid);
-    res.json({ activity });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    const record = await createRecord(TABLE_ACTIVITIES, { '活动名称': name, '活动日期': date || null, '活动地点': location || '', '默认时长': defaultHours || 2 });
+    res.json({ activity: { recordId: record.record_id, name, date: date || '', location: location || '', defaultHours: defaultHours || 2 } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ==================== 印章记录 ====================
+// ===== 印章记录 =====
 
-/**
- * GET /api/volunteers/stamp-records?volunteer_id=&status=
- */
-router.get('/stamp-records', (req, res) => {
+router.get('/stamp-records', async (req, res) => {
   try {
-    const db = getDb();
     const { volunteer_id, status } = req.query;
+    const conditions = [];
+    if (volunteer_id) conditions.push(`CurrentValue.[志愿者ID]="${volunteer_id}"`);
+    if (status) conditions.push(`CurrentValue.[状态]="${status}"`);
+    const filter = conditions.length > 0 ? (conditions.length === 1 ? conditions[0] : `AND(${conditions.join(',')})`) : undefined;
+    const items = await listAllRecords(TABLE_STAMP_RECORDS, filter ? { filter } : {});
 
-    let sql = `SELECT sr.*, a.name as activity_name, a.date as activity_date, a.location as activity_location,
-               v.name as volunteer_name, v.phone as volunteer_phone, v.department as volunteer_department
-               FROM stamp_records sr
-               LEFT JOIN activities a ON sr.activity_id = a.id
-               LEFT JOIN volunteers v ON sr.volunteer_id = v.id
-               WHERE 1=1`;
-    const params = [];
+    // 批量获取志愿者和活动名称
+    const [volItems, actItems] = await Promise.all([
+      listAllRecords(TABLE_VOLUNTEERS),
+      listAllRecords(TABLE_ACTIVITIES),
+    ]);
+    const volMap = Object.fromEntries(volItems.map(v => [v.record_id, v.fields['姓名'] || '']));
+    const actMap = Object.fromEntries(actItems.map(a => [a.record_id, { name: a.fields['活动名称'] || '', location: a.fields['活动地点'] || '' }]));
 
-    if (volunteer_id) {
-      sql += ' AND sr.volunteer_id = ?';
-      params.push(volunteer_id);
-    }
-    if (status) {
-      sql += ' AND sr.status = ?';
-      params.push(status);
-    }
-
-    sql += ' ORDER BY sr.created_at DESC';
-
-    const records = db.prepare(sql).all(...params);
+    const records = items.map(i => ({
+      recordId: i.record_id,
+      volunteerRecordId: i.fields['志愿者ID'] || '',
+      activityRecordId: i.fields['活动ID'] || '',
+      hours: i.fields['时长'] || 0,
+      date: i.fields['日期'] || '',
+      source: i.fields['来源'] || 'self',
+      status: i.fields['状态'] || 'pending',
+      note: i.fields['备注'] || '',
+      volunteerName: volMap[i.fields['志愿者ID']] || '',
+      activityName: (actMap[i.fields['活动ID']] || {}).name || '',
+      activityLocation: (actMap[i.fields['活动ID']] || {}).location || '',
+    }));
     res.json({ records });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/**
- * POST /api/volunteers/stamp-records
- */
-router.post('/stamp-records', (req, res) => {
+router.post('/stamp-records', async (req, res) => {
   try {
     const { volunteer_id, activity_id, hours, date, source, status, note } = req.body;
+    if (!volunteer_id || !activity_id) return res.status(400).json({ error: '志愿者和活动不能为空' });
+    // 防重复
+    const dup = await listAllRecords(TABLE_STAMP_RECORDS, { filter: `AND(CurrentValue.[志愿者ID]="${volunteer_id}",CurrentValue.[活动ID]="${activity_id}",CurrentValue.[状态]!="rejected")` });
+    if (dup.length > 0) return res.status(400).json({ error: '该活动的志愿章已存在' });
 
-    if (!volunteer_id || !activity_id) {
-      return res.status(400).json({ error: '志愿者和活动不能为空' });
-    }
-
-    const db = getDb();
-
-    const dup = db.prepare(
-      'SELECT id FROM stamp_records WHERE volunteer_id = ? AND activity_id = ? AND status != ?'
-    ).get(volunteer_id, activity_id, 'rejected');
-
-    if (dup) {
-      return res.status(400).json({ error: '该活动的志愿章已存在' });
-    }
-
-    const result = db.prepare(
-      `INSERT INTO stamp_records (volunteer_id, activity_id, hours, date, source, status, note)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(volunteer_id, activity_id, hours || 2, date || '', source || 'self', status || 'pending', note || '');
-
-    if (status === 'approved') {
-      updateVolunteerStats(volunteer_id);
-    }
-
-    const record = db.prepare(
-      `SELECT sr.*, a.name as activity_name FROM stamp_records sr
-       LEFT JOIN activities a ON sr.activity_id = a.id WHERE sr.id = ?`
-    ).get(result.lastInsertRowid);
-
-    res.json({ record });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * PUT /api/volunteers/stamp-records/:id/review
- */
-router.put('/stamp-records/:id/review', requireAdmin, (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
-
-    if (!['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({ error: '状态值无效' });
-    }
-
-    const db = getDb();
-    const record = db.prepare('SELECT * FROM stamp_records WHERE id = ?').get(id);
-    if (!record) return res.status(404).json({ error: '记录不存在' });
-
-    db.prepare('UPDATE stamp_records SET status = ?, reviewed_at = datetime(\'now\',\'localtime\') WHERE id = ?')
-      .run(status, id);
-
-    if (status === 'approved') {
-      updateVolunteerStats(record.volunteer_id);
-    }
-
+    const dateValue = date ? Math.round(new Date(date).getTime() / 1000) : null;
+    await createRecord(TABLE_STAMP_RECORDS, { '志愿者ID': volunteer_id, '活动ID': activity_id, '时长': hours || 2, '日期': dateValue, '来源': source || 'self', '状态': status || 'pending', '备注': note || '' });
+    // 如果直接approved，更新统计
+    if (status === 'approved') await updateVolunteerStats(volunteer_id);
     res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/**
- * POST /api/volunteers/stamp-records/batch
- */
-router.post('/stamp-records/batch', requireAdmin, (req, res) => {
+router.put('/stamp-records/:recordId/review', requireAdmin, async (req, res) => {
+  try {
+    const { recordId } = req.params;
+    const { status } = req.body;
+    if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: '状态值无效' });
+    // 获取原记录
+    const items = await listAllRecords(TABLE_STAMP_RECORDS, { filter: `CurrentValue.[记录ID]="${recordId}"` });
+    // 直接用recordId更新
+    await updateRecord(TABLE_STAMP_RECORDS, recordId, { '状态': status, '审核时间': Math.round(Date.now() / 1000) });
+    // 更新统计
+    if (status === 'approved' && items.length > 0) {
+      await updateVolunteerStats(items[0].fields['志愿者ID']);
+    }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/stamp-records/batch', requireAdmin, async (req, res) => {
   try {
     const { records } = req.body;
-    if (!Array.isArray(records) || records.length === 0) {
-      return res.status(400).json({ error: 'records不能为空' });
-    }
-
-    const db = getDb();
+    if (!Array.isArray(records) || records.length === 0) return res.status(400).json({ error: 'records不能为空' });
     let created = 0;
-    const updatedVolunteerIds = new Set();
-
-    const insertStmt = db.prepare(
-      `INSERT INTO stamp_records (volunteer_id, activity_id, hours, date, source, status, note)
-       VALUES (?, ?, ?, ?, 'admin', 'approved', '')`
-    );
-    const checkDup = db.prepare(
-      'SELECT id FROM stamp_records WHERE volunteer_id = ? AND activity_id = ? AND status != ?'
-    );
-
-    const transaction = db.transaction(() => {
-      for (const r of records) {
-        const dup = checkDup.get(r.volunteer_id, r.activity_id, 'rejected');
-        if (!dup) {
-          insertStmt.run(r.volunteer_id, r.activity_id, r.hours || 2, r.date || '');
-          created++;
-          updatedVolunteerIds.add(r.volunteer_id);
-        }
+    const updatedVolIds = new Set();
+    for (const r of records) {
+      const dup = await listAllRecords(TABLE_STAMP_RECORDS, { filter: `AND(CurrentValue.[志愿者ID]="${r.volunteer_id}",CurrentValue.[活动ID]="${r.activity_id}")` });
+      if (dup.length === 0) {
+        const dateValue = r.date ? Math.round(new Date(r.date).getTime() / 1000) : null;
+        await createRecord(TABLE_STAMP_RECORDS, { '志愿者ID': r.volunteer_id, '活动ID': r.activity_id, '时长': r.hours || 2, '日期': dateValue, '来源': 'admin', '状态': 'approved', '备注': '' });
+        created++;
+        updatedVolIds.add(r.volunteer_id);
       }
-    });
-
-    transaction();
-
-    for (const vid of updatedVolunteerIds) {
-      updateVolunteerStats(vid);
     }
-
+    for (const vid of updatedVolIds) { await updateVolunteerStats(vid); }
     res.json({ count: created });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ==================== 兑换 ====================
+// ===== 兑换 =====
 
-/**
- * POST /api/volunteers/redeem
- */
-router.post('/redeem', (req, res) => {
+router.post('/redeem', async (req, res) => {
   try {
     const { volunteer_id } = req.body;
     if (!volunteer_id) return res.status(400).json({ error: '志愿者ID不能为空' });
-
-    const db = getDb();
-    const volunteer = db.prepare('SELECT * FROM volunteers WHERE id = ?').get(volunteer_id);
-    if (!volunteer) return res.status(404).json({ error: '志愿者不存在' });
-
-    if (volunteer.total_stamps < 6) {
-      return res.status(400).json({ error: '志愿章不足6枚，暂不可兑换' });
-    }
-
-    if (volunteer.redeem_status === 'redeemed') {
-      return res.status(400).json({ error: '已兑换过礼品' });
-    }
-
-    db.prepare(
-      'INSERT INTO redemptions (volunteer_id, stamps_count, status) VALUES (?, ?, ?)'
-    ).run(volunteer_id, volunteer.total_stamps, 'pending');
-
-    db.prepare('UPDATE volunteers SET redeem_status = ?, redeem_at = datetime(\'now\',\'localtime\') WHERE id = ?')
-      .run('redeemed', volunteer_id);
-
-    const updatedVol = db.prepare('SELECT * FROM volunteers WHERE id = ?').get(volunteer_id);
-    res.json({ volunteer: updatedVol, message: '🎉 兑换成功！精美礼品将尽快送达' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    const vols = await listAllRecords(TABLE_VOLUNTEERS, { filter: `CurrentValue.[记录ID]="${volunteer_id}"` });
+    // 用recordId直接查
+    const volItems = await listAllRecords(TABLE_VOLUNTEERS);
+    const vol = volItems.find(v => v.record_id === volunteer_id);
+    if (!vol) return res.status(404).json({ error: '志愿者不存在' });
+    const stamps = vol.fields['志愿章数'] || 0;
+    const redeemStatus = vol.fields['兑换状态'] || '未兑换';
+    if (stamps < 6) return res.status(400).json({ error: '志愿章不足6枚，暂不可兑换' });
+    if (redeemStatus === '已兑换') return res.status(400).json({ error: '已兑换过礼品' });
+    await updateRecord(TABLE_VOLUNTEERS, volunteer_id, { '兑换状态': '已兑换' });
+    res.json({ ok: true, message: '🎉 兑换成功！' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/**
- * GET /api/volunteers/redemptions
- */
-router.get('/redemptions', requireAdmin, (req, res) => {
+// ===== 统计 =====
+
+router.get('/stats', requireAdmin, async (req, res) => {
   try {
-    const db = getDb();
-    const redemptions = db.prepare(
-      `SELECT r.*, v.name as volunteer_name, v.phone, v.department
-       FROM redemptions r
-       LEFT JOIN volunteers v ON r.volunteer_id = v.id
-       ORDER BY r.redeemed_at DESC`
-    ).all();
-    res.json({ redemptions });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    const [vols, approved, pending] = await Promise.all([
+      listAllRecords(TABLE_VOLUNTEERS),
+      listAllRecords(TABLE_STAMP_RECORDS, { filter: 'CurrentValue.[状态]="approved"' }),
+      listAllRecords(TABLE_STAMP_RECORDS, { filter: 'CurrentValue.[状态]="pending"' }),
+    ]);
+    const totalHours = approved.reduce((s, i) => s + (i.fields['时长'] || 0), 0);
+    const redeemCount = vols.filter(v => v.fields['兑换状态'] === '已兑换').length;
+    res.json({ volunteerCount: vols.length, approvedCount: approved.length, pendingCount: pending.length, totalHours, redeemCount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/**
- * GET /api/volunteers/stats
- */
-router.get('/stats', (req, res) => {
-  try {
-    const db = getDb();
-    const volunteerCount = db.prepare('SELECT COUNT(*) as c FROM volunteers').get().c;
-    const approvedCount = db.prepare("SELECT COUNT(*) as c FROM stamp_records WHERE status = 'approved'").get().c;
-    const pendingCount = db.prepare("SELECT COUNT(*) as c FROM stamp_records WHERE status = 'pending'").get().c;
-    const totalHours = db.prepare("SELECT COALESCE(SUM(hours),0) as s FROM stamp_records WHERE status = 'approved'").get().s;
-    const redeemCount = db.prepare("SELECT COUNT(*) as c FROM redemptions").get().c;
-
-    res.json({ volunteerCount, approvedCount, pendingCount, totalHours, redeemCount });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+// ===== 辅助：更新志愿者统计 =====
+async function updateVolunteerStats(volunteerRecordId) {
+  const approved = await listAllRecords(TABLE_STAMP_RECORDS, { filter: `AND(CurrentValue.[志愿者ID]="${volunteerRecordId}",CurrentValue.[状态]="approved")` });
+  const totalStamps = approved.length;
+  const totalHours = approved.reduce((s, i) => s + (i.fields['时长'] || 0), 0);
+  const redeemStatus = totalStamps >= 6 ? '可兑换' : '未兑换';
+  // 如果已兑换则不回退
+  const volItems = await listAllRecords(TABLE_VOLUNTEERS);
+  const vol = volItems.find(v => v.record_id === volunteerRecordId);
+  if (vol && vol.fields['兑换状态'] === '已兑换') {
+    await updateRecord(TABLE_VOLUNTEERS, volunteerRecordId, { '志愿章数': totalStamps, '志愿时长': totalHours });
+  } else {
+    await updateRecord(TABLE_VOLUNTEERS, volunteerRecordId, { '志愿章数': totalStamps, '志愿时长': totalHours, '兑换状态': redeemStatus });
   }
-});
-
-// 管理员中间件
-function requireAdmin(req, res, next) {
-  if (!req.session.admin) {
-    return res.status(403).json({ error: '需要管理员权限' });
-  }
-  next();
 }
 
 module.exports = router;
