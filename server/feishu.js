@@ -5,10 +5,10 @@ const FEISHU_BASE = 'https://open.feishu.cn/open-apis';
 // ===== 配置 =====
 const FEISHU_APP_ID = process.env.FEISHU_APP_ID || 'cli_aa9c0fff49f99cd2';
 const FEISHU_APP_SECRET = process.env.FEISHU_APP_SECRET || 'yrVIjOlWqAqHc5ItiL3YwglxxJ730t7q';
-const BITABLE_APP_TOKEN = process.env.BITABLE_APP_TOKEN || 'E17lbWDcuazeiksQSDycnLZwnbe';
-const TABLE_VOLUNTEERS = process.env.TABLE_VOLUNTEERS || 'tblprz63ICbhW9fH';
-const TABLE_ACTIVITIES = process.env.TABLE_ACTIVITIES || 'tbl49V0PsmVk6jZl';
-const TABLE_STAMP_RECORDS = process.env.TABLE_STAMP_RECORDS || 'tblEdAEZxywzcVFD';
+const BITABLE_APP_TOKEN = process.env.BITABLE_APP_TOKEN || 'PfZrbU7fLapzM6sRTFbci0Ownoe';
+const TABLE_VOLUNTEERS = process.env.TABLE_VOLUNTEERS || 'tblgZaaGcmvrug22';
+const TABLE_ACTIVITIES = process.env.TABLE_ACTIVITIES || 'tblgcfpniTUGpCay';
+const TABLE_STAMP_RECORDS = process.env.TABLE_STAMP_RECORDS || 'tbl4ItI4eUN7CGAQ';
 const ADMIN_EMPLOYEE_IDS = (process.env.ADMIN_EMPLOYEE_IDS || '').split(',').filter(Boolean);
 
 // ===== Token 缓存 =====

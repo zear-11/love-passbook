@@ -15,10 +15,10 @@ services:
       - key: FEISHU_APP_SECRET
         sync: false
       - key: BITABLE_APP_TOKEN
-        value: E17lbWDcuazeiksQSDycnZwnbe
+        value: PfZrbU7fLapzM6sRTFbci0Ownoe
       - key: TABLE_VOLUNTEERS
-        value: tblprz63ICbhW9fH
+        value: tblgZaaGcmvrug22
       - key: TABLE_ACTIVITIES
-        value: tbl49V0PsmVk6jZl
+        value: tblgcfpniTUGpCay
       - key: TABLE_STAMP_RECORDS
-        value: tblEdAEZxywzcVFD
+        value: tbl4ItI4eUN7CGAQ
