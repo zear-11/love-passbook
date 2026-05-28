@@ -236,9 +236,13 @@ async function initFeishuSDK() {
     const jsConfig = await configRes.json();
     const appConfigRes = await fetch('/api/auth/config');
     const appConfig = await appConfigRes.json();
-    await new Promise((resolve, reject) => { tt.config({ appId: appConfig.appId, timestamp: jsConfig.timestamp, nonceStr: jsConfig.nonceStr, signature: jsConfig.signature, jsApiList: ['requestAuthCode'], onSuccess: resolve, onFail: err => reject(new Error('tt.config失败: ' + JSON.stringify(err))) }); });
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { reject(new Error('SDK初始化超时')); }, 5000);
+      tt.config({ appId: appConfig.appId, timestamp: jsConfig.timestamp, nonceStr: jsConfig.nonceStr, signature: jsConfig.signature, jsApiList: ['requestAuthCode'], onSuccess: () => { clearTimeout(timer); resolve(); }, onFail: err => { clearTimeout(timer); reject(new Error('tt.config失败: ' + JSON.stringify(err))); } });
+    });
+    console.log('✅ 飞书JS-SDK初始化成功');
     return true;
-  } catch (err) { console.error('JS-SDK初始化失败:', err); return false; }
+  } catch (err) { console.error('❌ JS-SDK初始化失败:', err); return false; }
 }
 
 function requestAuthCodeWithTimeout(ms = 5000) {
