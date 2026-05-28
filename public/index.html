@@ -241,11 +241,15 @@ async function initFeishuSDK() {
   } catch (err) { console.error('JS-SDK初始化失败:', err); return false; }
 }
 
-function requestAuthCode() {
+function requestAuthCodeWithTimeout(ms = 5000) {
   return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { reject(new Error('登录超时，请重试或使用手动输入')); }, ms);
     fetch('/api/auth/config').then(r => r.json()).then(appConfig => {
-      tt.requestAuthCode({ appId: appConfig.appId, onSuccess: result => resolve(result.code), onFail: err => reject(err) });
-    }).catch(reject);
+      tt.requestAuthCode({ appId: appConfig.appId,
+        onSuccess: result => { clearTimeout(timer); resolve(result.code); },
+        onFail: err => { clearTimeout(timer); reject(err); }
+      });
+    }).catch(err => { clearTimeout(timer); reject(err); });
   });
 }
 
@@ -260,7 +264,7 @@ async function init() {
         loadingText.textContent = '正在登录...';
         const user = await checkUserSession();
         if (user) { onLoginSuccess(user); }
-        else { try { const authCode = await requestAuthCode(); const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ authCode }) }); if (result.user) { currentUser = result.user; onLoginSuccess(result.user); } } catch (e) { document.getElementById('feishuLoginSection').style.display = 'block'; } }
+        else { try { const authCode = await requestAuthCodeWithTimeout(5000); const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ authCode }) }); if (result.user) { currentUser = result.user; onLoginSuccess(result.user); } } catch (e) { console.error('飞书登录失败:', e); document.getElementById('feishuLoginSection').style.display = 'block'; document.getElementById('manualLoginSection').style.display = 'block'; } }
       } else { document.getElementById('feishuLoginSection').style.display = 'block'; }
     } else {
       // 非飞书环境：显示手动输入
@@ -268,15 +272,15 @@ async function init() {
       const user = await checkUserSession();
       if (user) { currentUser = user; onLoginSuccess(user); }
     }
-    await refreshActivitySelects();
-  } catch (e) { document.getElementById('manualLoginSection').style.display = 'block'; }
+    try { await refreshActivitySelects(); } catch (e) { console.error('活动列表加载失败:', e); }
+  } catch (e) { console.error('初始化失败:', e); document.getElementById('manualLoginSection').style.display = 'block'; }
   document.getElementById('loadingScreen').classList.add('hide');
 }
 
 async function checkUserSession() { try { const r = await api('/api/auth/me'); if (r.user) { currentUser = r.user; return r.user; } } catch (e) {} return null; }
 
 window.feishuAutoLogin = async function() {
-  try { showToast('正在登录...', 'info'); const authCode = await requestAuthCode(); const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ authCode }) }); if (result.user) { currentUser = result.user; onLoginSuccess(result.user); document.getElementById('feishuLoginSection').style.display = 'none'; } } catch (err) { showToast('登录失败', 'error'); }
+  try { showToast('正在登录...', 'info'); const authCode = await requestAuthCodeWithTimeout(8000); const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ authCode }) }); if (result.user) { currentUser = result.user; onLoginSuccess(result.user); document.getElementById('feishuLoginSection').style.display = 'none'; } } catch (err) { showToast('飞书登录失败，请使用手动输入', 'error'); document.getElementById('manualLoginSection').style.display = 'block'; }
 };
 
 function onLoginSuccess(user) {
