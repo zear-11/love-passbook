@@ -4,8 +4,9 @@ const { TABLE_VOLUNTEERS, TABLE_ACTIVITIES, TABLE_STAMP_RECORDS,
 
 const router = express.Router();
 
-// 所有路由需登录
+// 所有路由需登录（活动列表除外）
 router.use((req, res, next) => {
+  if (req.path === '/activities' && req.method === 'GET') return next();
   if (!req.session.user && !req.session.admin) return res.status(401).json({ error: '未登录' });
   next();
 });
