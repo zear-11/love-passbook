@@ -259,26 +259,40 @@ function requestAuthCodeWithTimeout(ms = 5000) {
 
 // ===== 初始化 =====
 async function init() {
-  const loadingText = document.getElementById('loadingText');
-  try {
-    if (isInFeishu()) {
-      loadingText.textContent = '正在初始化飞书...';
-      const sdkReady = await initFeishuSDK();
-      if (sdkReady) {
-        loadingText.textContent = '正在登录...';
-        const user = await checkUserSession();
-        if (user) { onLoginSuccess(user); }
-        else { try { const authCode = await requestAuthCodeWithTimeout(5000); const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ authCode }) }); if (result.user) { currentUser = result.user; onLoginSuccess(result.user); } } catch (e) { console.error('飞书登录失败:', e); document.getElementById('feishuLoginSection').style.display = 'block'; document.getElementById('manualLoginSection').style.display = 'block'; } }
-      } else { document.getElementById('feishuLoginSection').style.display = 'block'; }
-    } else {
-      // 非飞书环境：显示手动输入
-      document.getElementById('manualLoginSection').style.display = 'block';
-      const user = await checkUserSession();
-      if (user) { currentUser = user; onLoginSuccess(user); }
-    }
-    try { await refreshActivitySelects(); } catch (e) { console.error('活动列表加载失败:', e); }
-  } catch (e) { console.error('初始化失败:', e); document.getElementById('manualLoginSection').style.display = 'block'; }
+  // 1. 立即隐藏loading，展示主页面，不等任何飞书操作
   document.getElementById('loadingScreen').classList.add('hide');
+
+  // 2. 默认显示查询框和飞书登录按钮（活动列表不依赖登录）
+  document.getElementById('feishuLoginSection').style.display = isInFeishu() ? 'block' : 'none';
+  document.getElementById('manualLoginSection').style.display = 'block';
+
+  // 3. 异步加载活动列表（不阻塞）
+  refreshActivitySelects().catch(e => console.error('活动列表加载失败:', e));
+
+  // 4. 后台静默尝试飞书自动登录（成功则自动识别身份，失败不影响使用）
+  if (isInFeishu()) {
+    silentFeishuLogin();
+  } else {
+    // 非飞书环境检查已有session
+    checkUserSession().then(user => { if (user) onLoginSuccess(user); }).catch(() => {});
+  }
+}
+
+async function silentFeishuLogin() {
+  try {
+    // 先检查有没有现成session
+    const user = await checkUserSession();
+    if (user) { onLoginSuccess(user); document.getElementById('feishuLoginSection').style.display = 'none'; return; }
+    // 没有则尝试SDK登录（5秒超时，失败静默）
+    const sdkReady = await Promise.race([initFeishuSDK(), new Promise(r => setTimeout(() => r(false), 5000))]);
+    if (!sdkReady) return;
+    const authCode = await requestAuthCodeWithTimeout(5000);
+    const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ authCode }) });
+    if (result.user) { currentUser = result.user; onLoginSuccess(result.user); document.getElementById('feishuLoginSection').style.display = 'none'; }
+  } catch (e) {
+    console.log('飞书静默登录失败（不影响使用）:', e.message);
+    // 静默失败，用户可以点"飞书一键登录"按钮或用手动输入
+  }
 }
 
 async function checkUserSession() { try { const r = await api('/api/auth/me'); if (r.user) { currentUser = r.user; return r.user; } } catch (e) {} return null; }
