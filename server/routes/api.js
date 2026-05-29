@@ -4,9 +4,19 @@ const { TABLE_VOLUNTEERS, TABLE_ACTIVITIES, TABLE_STAMP_RECORDS,
 
 const router = express.Router();
 
-// 所有路由需登录（活动列表除外）
+// 公开接口白名单（不需要登录）
+const PUBLIC_ROUTES = [
+  { path: '/activities', method: 'GET' },
+  { path: '/volunteers', method: 'GET' },
+  { path: '/volunteers', method: 'POST' },
+  { path: '/stamp-records', method: 'GET' },
+  { path: '/stamp-records', method: 'POST' },
+  { path: '/redeem', method: 'POST' },
+];
 router.use((req, res, next) => {
-  if (req.path === '/activities' && req.method === 'GET') return next();
+  const isPublic = PUBLIC_ROUTES.some(r => req.path === r.path && req.method === r.method)
+    || req.path.startsWith('/stamp-records/') && req.method === 'GET';
+  if (isPublic) return next();
   if (!req.session.user && !req.session.admin) return res.status(401).json({ error: '未登录' });
   next();
 });
