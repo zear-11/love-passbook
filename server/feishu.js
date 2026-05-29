@@ -35,7 +35,8 @@ async function getAppAccessToken() {
   const res = await axios.post(`${FEISHU_BASE}/auth/v3/app_access_token/internal`, {
     app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET,
   });
-  if (res.data.code !== 0) throw new Error('获取app_access_token失败: ' + res.data.msg);
+  console.log('app_access_token response:', JSON.stringify(res.data));
+  if (res.data.code !== 0) throw new Error('获取app_access_token失败: ' + (res.data.msg || JSON.stringify(res.data)));
   appTokenCache = { token: res.data.app_access_token, expiresAt: Date.now() + (res.data.expire - 300) * 1000 };
   return appTokenCache.token;
 }
@@ -57,7 +58,8 @@ async function getUserAccessToken(authCode) {
   const res = await axios.post(`${FEISHU_BASE}/authen/v1/oidc/access_token`, {
     grant_type: 'authorization_code', code: authCode,
   }, { headers: { Authorization: `Bearer ${appToken}`, 'Content-Type': 'application/json' } });
-  if (res.data.code !== 0) throw new Error('获取user_access_token失败: ' + res.data.msg);
+  console.log('user_access_token response:', JSON.stringify(res.data));
+  if (res.data.code !== 0) throw new Error('获取user_access_token失败: ' + (res.data.msg || res.data.message || JSON.stringify(res.data)));
   return res.data.data;
 }
 
