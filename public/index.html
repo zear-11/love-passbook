@@ -298,7 +298,26 @@ async function silentFeishuLogin() {
 async function checkUserSession() { try { const r = await api('/api/auth/me'); if (r.user) { currentUser = r.user; return r.user; } } catch (e) {} return null; }
 
 window.feishuAutoLogin = async function() {
-  try { showToast('正在登录...', 'info'); const authCode = await requestAuthCodeWithTimeout(8000); const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ authCode }) }); if (result.user) { currentUser = result.user; onLoginSuccess(result.user); document.getElementById('feishuLoginSection').style.display = 'none'; } } catch (err) { showToast('飞书登录失败，请使用手动输入', 'error'); document.getElementById('manualLoginSection').style.display = 'block'; }
+  try {
+    showToast('正在登录...', 'info');
+    // 先确保SDK已初始化（按钮点击时可能还未配置过tt.config）
+    showToast('正在连接飞书...', 'info');
+    const sdkReady = await initFeishuSDK();
+    if (!sdkReady) {
+      showToast('飞书连接失败，请使用手动输入查询', 'error');
+      document.getElementById('manualLoginSection').style.display = 'block';
+      return;
+    }
+    // SDK就绪，请求授权码
+    const authCode = await requestAuthCodeWithTimeout(10000);
+    showToast('正在验证身份...', 'info');
+    const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ authCode }) });
+    if (result.user) { currentUser = result.user; onLoginSuccess(result.user); document.getElementById('feishuLoginSection').style.display = 'none'; }
+  } catch (err) {
+    console.error('飞书一键登录错误:', err);
+    showToast('登录失败: ' + err.message + '，请用手动输入', 'error');
+    document.getElementById('manualLoginSection').style.display = 'block';
+  }
 };
 
 function onLoginSuccess(user) {
